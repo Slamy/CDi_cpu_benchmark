@@ -1,0 +1,82 @@
+* Self-contained raw TRAP #7 gateway for the SCC68070 (vector 39, $9c).
+* All C entry points run in user mode. Only IrqTrap executes in supervisor mode.
+* XCC passes the first integer argument in d0. No OS-9 trap function words.
+ psect irq,0,0,1,0,0
+TrapVector equ $9c
+
+ vsect
+SavedVector ds.l 1
+InstalledVector ds.l 1
+ ends
+
+irq_init:
+ move.l a0,-(sp)
+ tst.l InstalledVector(a6)
+ bne.s InitFailed
+ lea IrqTrap(pc),a0
+ move.l TrapVector,SavedVector(a6)
+ move.l a0,InstalledVector(a6)
+ move.l a0,TrapVector
+ cmp.l TrapVector,a0
+ bne.s InitFailed
+ moveq #0,d0
+ bra.s InitDone
+InitFailed:
+ moveq #-1,d0
+InitDone:
+ move.l (sp)+,a0
+ rts
+
+irq_mask:
+ move.l #$0700,d0
+ trap #7
+ andi.l #$0700,d0
+ rts
+
+irq_restore:
+ trap #7
+ moveq #0,d0
+ rts
+
+irq_state:
+ moveq #-1,d0
+ trap #7
+ rts
+
+irq_finish:
+ move.l a0,-(sp)
+ move.l InstalledVector(a6),a0
+ move.l a0,d0
+ beq.s FinishOK
+ cmp.l TrapVector,a0
+ bne.s FinishFailed
+ move.l SavedVector(a6),TrapVector
+ clr.l InstalledVector(a6)
+FinishOK:
+ moveq #0,d0
+ bra.s FinishDone
+FinishFailed:
+ moveq #-1,d0
+FinishDone:
+ move.l (sp)+,a0
+ rts
+
+* Hardware exception frame: SR at (sp), PC at 2(sp), format/vector at 6(sp).
+* After saving d1, SR is at 4(sp). Leave PC, format and every non-IPL SR bit
+* untouched; RTE returns to the caller's original user/supervisor mode.
+* d0 = -1 queries SR; otherwise d0 supplies the replacement IPL bits.
+* d0 returns the original SR, zero-extended. d1 is preserved.
+IrqTrap:
+ move.l d1,-(sp)
+ moveq #0,d1
+ move.w 4(sp),d1
+ cmpi.l #-1,d0
+ beq.s TrapDone
+ andi.w #$0700,d0
+ andi.w #$f8ff,4(sp)
+ or.w d0,4(sp)
+TrapDone:
+ move.l d1,d0
+ move.l (sp)+,d1
+ rte
+ ends
